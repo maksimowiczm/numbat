@@ -46,9 +46,9 @@
 //! list_expr       ::=   "[]" | "[" expression ( "," expression ) * "]"
 //!
 //! number          ::=   [0-9][0-9_]*("." ([0-9][0-9_]*)?)?([eE][+-]?[0-9][0-9_]*)?
-//! hex_number      ::=   "0x" [0-9a-fA-F]*
-//! oct_number      ::=   "0o" [0-7]*
-//! bin_number      ::=   "0b" [01]*
+//! hex_number      ::=   "0x" [0-9a-fA-F]* todo floating grammar
+//! oct_number      ::=   "0o" [0-7]* todo floating grammar
+//! bin_number      ::=   "0b" [01]* todo floating grammar
 //! integer         ::=   [0-9]([0-9_]*[0-9])?
 //! identifier      ::=   identifier_s identifier_c*
 //! identifier_s    ::=   Unicode_XID_Start | Unicode_Currency | "%" | "°" | "′" | "″" | "_"
@@ -74,7 +74,7 @@ use crate::resolver::ModulePath;
 use crate::span::Span;
 use crate::tokenizer::{Token, TokenKind, TokenizerError, TokenizerErrorKind};
 
-use num_traits::{CheckedDiv, FromPrimitive, Zero};
+use num_traits::{CheckedDiv, FromPrimitive, Num, Zero};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -1216,6 +1216,27 @@ impl<'a> Parser<'a> {
                 self.last().unwrap().span,
                 Number::from_f64(num_string.parse::<f64>().unwrap()),
             ))
+        } else if let Some(hex_float) = self.match_exact(TokenKind::FloatWithBase(16)) {
+            let span = self.last().unwrap().span;
+            let num_string = hex_float.lexeme.replace('_', "");
+            Ok(Expression::Scalar(
+                span,
+                Number::from_f64(f64::from_str_radix(&num_string[2..], 16).unwrap()),
+            ))
+        } else if let Some(hex_float) = self.match_exact(TokenKind::FloatWithBase(8)) {
+            let span = self.last().unwrap().span;
+            let num_string = hex_float.lexeme.replace('_', "");
+            Ok(Expression::Scalar(
+                span,
+                Number::from_f64(f64::from_str_radix(&num_string[2..], 8).unwrap()),
+            ))
+        } else if let Some(hex_float) = self.match_exact(TokenKind::FloatWithBase(2)) {
+            let span = self.last().unwrap().span;
+            let num_string = hex_float.lexeme.replace('_', "");
+            Ok(Expression::Scalar(
+                span,
+                Number::from_f64(f64::from_str_radix(&num_string[2..], 2).unwrap()),
+            ))
         } else if let Some(hex_int) = self.match_exact(TokenKind::IntegerWithBase(16)) {
             let span = self.last().unwrap().span;
             Ok(Expression::Scalar(
@@ -2021,7 +2042,10 @@ mod tests {
         should_fail(&["0b10102"]);
 
         // Until we support hexadecimal float notation
-        should_fail(&["0x1.2", "0b1.0", "0o1.0", "0x.1", "0b.0", "0o.1"]);
+        parse_as_expression(
+            &["0x0.8", "0b0.1", "0o0.4", "0x.8", "0b.1", "0o.4"],
+            scalar!(0.5),
+        );
     }
 
     #[test]

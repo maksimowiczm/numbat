@@ -124,6 +124,7 @@ pub enum TokenKind {
     // Variable-length tokens
     Number,
     IntegerWithBase(usize),
+    FloatWithBase(usize),
     Identifier,
 
     // A normal string without interpolation: `"hello world"`
@@ -285,8 +286,11 @@ impl Tokenizer {
         at_least_one_digit: bool,
         disallow_leading_underscore: bool,
         disallow_dot_after_stream: bool,
+        is_digit: Option<&dyn Fn(char) -> bool>,
     ) -> Result<()> {
-        if at_least_one_digit && !self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        let is_digit = is_digit.unwrap_or(&|ch: char| ch.is_ascii_digit());
+
+        if at_least_one_digit && !self.peek().map(is_digit).unwrap_or(false) {
             return Err(TokenizerError {
                 kind: TokenizerErrorKind::ExpectedDigit {
                     character: self.peek(),
@@ -306,7 +310,7 @@ impl Tokenizer {
         let mut last_char = None;
         while self
             .peek()
-            .map(|c| c.is_ascii_digit() || c == '_')
+            .map(|c| is_digit(c) || c == '_')
             .unwrap_or(false)
         {
             last_char = Some(self.advance());
@@ -339,7 +343,7 @@ impl Tokenizer {
         {
             let _ = self.match_char('+') || self.match_char('-');
 
-            self.consume_stream_of_digits(true, true, true)?;
+            self.consume_stream_of_digits(true, true, true, None)?;
         }
 
         Ok(())
@@ -459,52 +463,54 @@ impl Tokenizer {
 
                 self.advance(); // skip over the x/o/b
 
-                // If the first character is not a digits, that's an error.
-                if !self.peek().map(&is_digit_in_base).unwrap_or(false) {
-                    return tokenizer_error(
-                        &self.current,
-                        TokenizerErrorKind::ExpectedDigitInBase {
-                            base,
-                            character: self.peek(),
-                        },
-                    );
-                }
-
-                let mut last_char = None;
-
-                while self
-                    .peek()
-                    .map(|c| is_digit_in_base(c) || c == '_')
-                    .unwrap_or(false)
-                {
-                    last_char = self.peek();
+                if self.peek().map(|c| c == '.').unwrap_or(false) {
                     self.advance();
-                }
+                    self.consume_stream_of_digits(false, true, false, Some(&is_digit_in_base))?;
+                    TokenKind::FloatWithBase(base)
+                } else {
+                    // If the first character is not a digits, that's an error.
+                    if !self.peek().map(|ch| is_digit_in_base(ch)).unwrap_or(false) {
+                        return tokenizer_error(
+                            &self.current,
+                            TokenizerErrorKind::ExpectedDigitInBase {
+                                base,
+                                character: self.peek(),
+                            },
+                        );
+                    }
 
-                // Numeric literal should not end with a `_` either.
-                if last_char == Some('_')
-                    || self
-                        .peek()
-                        .map(|c| is_identifier_continue(c) || c == '.')
-                        .unwrap_or(false)
-                {
-                    return tokenizer_error(
-                        &self.current,
-                        TokenizerErrorKind::ExpectedDigitInBase {
-                            base,
-                            character: self.peek(),
-                        },
-                    );
-                }
+                    self.consume_stream_of_digits(true, true, false, Some(&is_digit_in_base))?;
 
-                TokenKind::IntegerWithBase(base)
+                    if self.peek().map(|c| c == '.').unwrap_or(false) {
+                        self.advance();
+                        self.consume_stream_of_digits(false, true, false, Some(&is_digit_in_base))?;
+                        TokenKind::FloatWithBase(base)
+                    } else {
+                        // Numeric literal should not end with a `_` either.
+                        if self
+                            .peek()
+                            .map(|c| is_identifier_continue(c) || c == '_' || c == '.')
+                            .unwrap_or(false)
+                        {
+                            return tokenizer_error(
+                                &self.current,
+                                TokenizerErrorKind::ExpectedDigitInBase {
+                                    base,
+                                    character: self.peek(),
+                                },
+                            );
+                        }
+
+                        TokenKind::IntegerWithBase(base)
+                    }
+                }
             }
             c if c.is_ascii_digit() => {
-                self.consume_stream_of_digits(false, false, false)?;
+                self.consume_stream_of_digits(false, false, false, None)?;
 
                 // decimal part
                 if self.match_char('.') {
-                    self.consume_stream_of_digits(false, true, true)?;
+                    self.consume_stream_of_digits(false, true, true, None)?;
                 }
 
                 self.scientific_notation()?;
@@ -519,7 +525,7 @@ impl Tokenizer {
             }
             '.' if self.peek().map_or(false, is_identifier_start) => TokenKind::Period,
             '.' => {
-                self.consume_stream_of_digits(true, true, true)?;
+                self.consume_stream_of_digits(true, true, true, None)?;
                 self.scientific_notation()?;
 
                 TokenKind::Number
@@ -934,6 +940,14 @@ fn test_tokenize_numbers() {
     );
 
     insta::assert_snapshot!(
+        tokenize_reduced_pretty("0b0.1").unwrap(),
+        @r###"
+    "0b0.1", FloatWithBase(2), (1, 1)
+    "", Eof, (1, 6)
+    "###
+    );
+
+    insta::assert_snapshot!(
         tokenize_reduced_pretty("0o01234567").unwrap(),
         @r###"
     "0o01234567", IntegerWithBase(8), (1, 1)
@@ -950,6 +964,14 @@ fn test_tokenize_numbers() {
     );
 
     insta::assert_snapshot!(
+        tokenize_reduced_pretty("0o0.1").unwrap(),
+        @r###"
+    "0o0.1", FloatWithBase(8), (1, 1)
+    "", Eof, (1, 6)
+    "###
+    );
+
+    insta::assert_snapshot!(
         tokenize_reduced_pretty("0x1234567890abcdef").unwrap(),
         @r###"
     "0x1234567890abcdef", IntegerWithBase(16), (1, 1)
@@ -961,6 +983,14 @@ fn test_tokenize_numbers() {
         tokenize_reduced_pretty("0x1_2").unwrap(),
         @r###"
     "0x1_2", IntegerWithBase(16), (1, 1)
+    "", Eof, (1, 6)
+    "###
+    );
+
+    insta::assert_snapshot!(
+        tokenize_reduced_pretty("0x0.f").unwrap(),
+        @r###"
+    "0x0.f", FloatWithBase(16), (1, 1)
     "", Eof, (1, 6)
     "###
     );
@@ -998,7 +1028,7 @@ fn test_tokenize_numbers() {
 
     insta::assert_snapshot!(
         tokenize_reduced_pretty("0b1_").unwrap_err(),
-        @"Error at (1, 5): `Expected base-2 digit`"
+        @"Error at (1, 4): `Unexpected character in number literal: '_'`"
     );
 
     insta::assert_snapshot!(
@@ -1023,7 +1053,7 @@ fn test_tokenize_numbers() {
 
     insta::assert_snapshot!(
         tokenize_reduced_pretty("0o1_").unwrap_err(),
-        @"Error at (1, 5): `Expected base-8 digit`"
+        @"Error at (1, 4): `Unexpected character in number literal: '_'`"
     );
 
     insta::assert_snapshot!(
@@ -1048,7 +1078,7 @@ fn test_tokenize_numbers() {
 
     insta::assert_snapshot!(
         tokenize_reduced_pretty("0x1_").unwrap_err(),
-        @"Error at (1, 5): `Expected base-16 digit`"
+        @"Error at (1, 4): `Unexpected character in number literal: '_'`"
     );
 }
 

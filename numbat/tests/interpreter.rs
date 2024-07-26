@@ -108,8 +108,9 @@ fn simple_value() {
     expect_failure("0b", "Expected base-2 digit");
     expect_failure("0b_", "Expected base-2 digit");
     expect_failure("0b_0", "Expected base-2 digit");
-    expect_failure("0b0_", "Expected base-2 digit");
-    expect_failure("0b0.0", "Expected base-2 digit");
+    expect_failure("0b0_", "Unexpected character in number literal: '_'");
+    expect_output("0b.0", "0");
+    expect_output("0b0.0", "0");
 
     expect_output("0o0", "0");
     expect_output("0o01234567", "342_391");
@@ -118,8 +119,9 @@ fn simple_value() {
     expect_failure("0o", "Expected base-8 digit");
     expect_failure("0o_", "Expected base-8 digit");
     expect_failure("0o_0", "Expected base-8 digit");
-    expect_failure("0o0_", "Expected base-8 digit");
-    expect_failure("0o0.0", "Expected base-8 digit");
+    expect_failure("0o0_", "Unexpected character in number literal: '_'");
+    expect_output("0o.0", "0");
+    expect_output("0o0.0", "0");
 
     expect_output("0x0", "0");
     expect_output("0x0123456789abcdef", "8.19855e+16");
@@ -128,8 +130,9 @@ fn simple_value() {
     expect_failure("0x", "Expected base-16 digit");
     expect_failure("0x_", "Expected base-16 digit");
     expect_failure("0x_0", "Expected base-16 digit");
-    expect_failure("0x0_", "Expected base-16 digit");
-    expect_failure("0x0.0", "Expected base-16 digit");
+    expect_failure("0x0_", "Unexpected character in number literal: '_'");
+    expect_output("0x0.0", "0");
+    expect_output("0x.0", "0");
 
     expect_output("NaN", "NaN");
     expect_output("inf", "inf");
