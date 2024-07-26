@@ -108,9 +108,15 @@ fn assert_eq(_: &mut ExecutionContext, mut args: Args, arg_spans: Vec<Span>) -> 
         }
     } else {
         let lhs = quantity_arg!(args);
-        let rhs = quantity_arg!(args);
+        let rhs = match quantity_arg!(args).convert_to(lhs.unit()) {
+            Ok(rhs) => rhs,
+            Err(e) => return ControlFlow::Break(RuntimeError::QuantityError(e)),
+        };
         let result = &lhs - &rhs;
-        let eps = quantity_arg!(args);
+        let eps = match quantity_arg!(args).convert_to(lhs.unit()) {
+            Ok(eps) => eps,
+            Err(e) => return ControlFlow::Break(RuntimeError::QuantityError(e)),
+        };
 
         match result {
             Ok(diff) => match diff.convert_to(eps.unit()) {
